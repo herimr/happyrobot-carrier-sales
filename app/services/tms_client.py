@@ -207,25 +207,47 @@ def search_loads(
     equipment_type: EquipmentType,
 ) -> list[Load]:
 
-    fields: dict[str, str] = {
-        "ORIGIN": origin,
-        "EQUIPMENT": equipment_type.value.upper(),
-    }
+    possible_requests = [
+        _build_request(
+            "LOAD_QUERY",
+            ORIGIN=origin,
+            EQUIPMENT=equipment_type.value.upper(),
+        ),
 
-    if destination:
-        fields["DESTINATION"] = destination
+        _build_request(
+            "LOAD_QUERY",
+            ORIGIN_CITY=origin,
+            EQUIPMENT=equipment_type.value.upper(),
+        ),
 
-    request = _build_request("LOAD_QUERY", **fields)
+        _build_request(
+            "LOAD_QUERY",
+            ORIGIN=origin,
+        ),
 
-    print(f"TMS REQUEST: {request}")
+        _build_request(
+            "LOAD_QUERY",
+            EQUIPMENT=equipment_type.value.upper(),
+        ),
+    ]
 
-    raw = _send_recv(request)
+    for req in possible_requests:
+        print("TRYING:", req)
 
-    print(f"TMS RESPONSE: {raw!r}")
+        raw = _send_recv(req)
 
-    records = _decode_response(raw)
+        print("RESPONSE:", raw)
 
-    return [_record_to_load(r) for r in records]
+        try:
+            records = _decode_response(raw)
+            return [_record_to_load(r) for r in records]
+        except TmsBusinessError:
+            continue
+
+    raise TmsBusinessError(
+        "SEARCH_FAILED",
+        "Could not determine required TMS search fields"
+    )
 
 
 def get_load_detail(load_id: str) -> Optional[Load]:
