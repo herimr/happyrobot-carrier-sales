@@ -85,7 +85,7 @@ def _send_recv(line: str) -> bytes:
         )
 
     payload = (line + "\r\n").encode("ascii")
-last_error: Exception | None = None
+    last_error: Exception | None = None
 
     for attempt in range(MAX_RETRIES + 1):
         try:
