@@ -235,8 +235,8 @@ def book_load(load_id: str, mc_number: str, agreed_rate: float) -> BookLoadRespo
     raw = _send_recv(_build_request(
         "LOAD_BOOK",
         LOAD_ID=load_id,
-        MC=mc_number,
-        RATE=f"{agreed_rate:.2f}",
+        MC_NUM=mc_number,
+        AGREED_RATE=f"{agreed_rate:.2f}",
     ))
     records = _decode_response(raw)
     confirmation_id = records[0].get("CONFIRMATION_ID", "") if records else ""
