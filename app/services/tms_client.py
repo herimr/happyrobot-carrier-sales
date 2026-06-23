@@ -206,15 +206,25 @@ def search_loads(
     destination: Optional[str],
     equipment_type: EquipmentType,
 ) -> list[Load]:
+
     fields: dict[str, str] = {
         "ORIGIN": origin,
         "EQUIPMENT": equipment_type.value.upper(),
     }
+
     if destination:
         fields["DESTINATION"] = destination
 
-    raw = _send_recv(_build_request("LOAD_QUERY", **fields))
+    request = _build_request("LOAD_QUERY", **fields)
+
+    print(f"TMS REQUEST: {request}")
+
+    raw = _send_recv(request)
+
+    print(f"TMS RESPONSE: {raw!r}")
+
     records = _decode_response(raw)
+
     return [_record_to_load(r) for r in records]
 
 
@@ -232,14 +242,19 @@ def get_load_detail(load_id: str) -> Optional[Load]:
 
 
 def book_load(load_id: str, mc_number: str, agreed_rate: float) -> BookLoadResponse:
-    raw = _send_recv(
-        _build_request(
-            "LOAD_BOOK",
-            LOAD_ID=load_id,
-            MC=mc_number,
-            RATE=f"{agreed_rate:.2f}",
-        )
+
+    request = _build_request(
+        "LOAD_BOOK",
+        LOAD_ID=load_id,
+        MC=mc_number,
+        RATE=f"{agreed_rate:.2f}",
     )
+
+    print(f"TMS REQUEST: {request}")
+
+    raw = _send_recv(request)
+
+    print(f"TMS RESPONSE: {raw!r}")
 
     records = _decode_response(raw)
 
