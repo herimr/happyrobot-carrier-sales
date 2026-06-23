@@ -232,16 +232,22 @@ def get_load_detail(load_id: str) -> Optional[Load]:
 
 
 def book_load(load_id: str, mc_number: str, agreed_rate: float) -> BookLoadResponse:
-    raw = _send_recv(_build_request(
-        "LOAD_BOOK",
-        LOAD_ID=load_id,
-        MC_NUM=mc_number,
-        AGREED_RATE=f"{agreed_rate:.2f}",
-    ))
+    raw = _send_recv(
+        _build_request(
+            "LOAD_BOOK",
+            LOAD_ID=load_id,
+            MC=mc_number,
+            RATE=f"{agreed_rate:.2f}",
+        )
+    )
+
     records = _decode_response(raw)
+
     confirmation_id = records[0].get("CONFIRMATION_ID", "") if records else ""
+
     if not confirmation_id:
         raise TmsProtocolError("TMS returned OK but no CONFIRMATION_ID")
+
     return BookLoadResponse(
         confirmation_id=confirmation_id,
         load_id=load_id,
