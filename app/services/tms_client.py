@@ -78,38 +78,59 @@ _breaker = _CircuitBreaker()
 
 def _send_recv(line: str) -> bytes:
     """Send one request line, read until END\\r\\n or ERR line."""
+
     if _breaker.is_open():
-        raise TmsConnectionError("circuit open: TMS has failed repeatedly, cooling down")
+        raise TmsConnectionError(
+            "circuit open: TMS has failed repeatedly, cooling down"
+        )
 
     payload = (line + "\r\n").encode("ascii")
-    last_error: Exception | None = None
+last_error: Exception | None = None
 
     for attempt in range(MAX_RETRIES + 1):
         try:
+
+            print(f"TMS_HOST={settings.tms_host}")
+            print(f"TMS_PORT={settings.tms_port}")
+            print(f"TMS_PAYLOAD={line}")
+
             with socket.create_connection(
-                (settings.tms_host, settings.tms_port), timeout=SOCKET_TIMEOUT_SECONDS
+                (settings.tms_host, settings.tms_port),
+                timeout=SOCKET_TIMEOUT_SECONDS,
             ) as sock:
+
                 sock.sendall(payload)
+
                 buf = b""
+
                 while True:
                     chunk = sock.recv(4096)
+
                     if not chunk:
                         break
+
                     buf += chunk
-                    if buf.endswith(b"END\r\n") or b"\r\nERR|" in buf or buf.startswith(b"ERR|"):
+
+                    if (
+                        buf.endswith(b"END\r\n")
+                        or b"\r\nERR|" in buf
+                        or buf.startswith(b"ERR|")
+                    ):
                         break
+
                 _breaker.record_success()
                 return buf
+
         except (socket.timeout, ConnectionError, OSError) as exc:
             last_error = exc
             _breaker.record_failure()
+
             if attempt < MAX_RETRIES:
                 time.sleep(BACKOFF_SCHEDULE[attempt])
 
     raise TmsConnectionError(
         f"TMS unreachable after {MAX_RETRIES + 1} attempts: {last_error}"
     )
-
 
 # ---------------------------------------------------------------------------
 # Encoding
@@ -207,47 +228,25 @@ def search_loads(
     equipment_type: EquipmentType,
 ) -> list[Load]:
 
-    possible_requests = [
-        _build_request(
-            "LOAD_QUERY",
-            ORIGIN=origin,
-            EQUIPMENT=equipment_type.value.upper(),
-        ),
+    fields: dict[str, str] = {
+        "ORIGIN": origin,
+        "EQUIPMENT": equipment_type.value.upper(),
+    }
 
-        _build_request(
-            "LOAD_QUERY",
-            ORIGIN_CITY=origin,
-            EQUIPMENT=equipment_type.value.upper(),
-        ),
+    if destination:
+        fields["DESTINATION"] = destination
 
-        _build_request(
-            "LOAD_QUERY",
-            ORIGIN=origin,
-        ),
+    request = _build_request("LOAD_QUERY", **fields)
 
-        _build_request(
-            "LOAD_QUERY",
-            EQUIPMENT=equipment_type.value.upper(),
-        ),
-    ]
+    print(f"TMS REQUEST: {request}")
 
-    for req in possible_requests:
-        print("TRYING:", req)
+    raw = _send_recv(request)
 
-        raw = _send_recv(req)
+    print(f"TMS RESPONSE: {raw!r}")
 
-        print("RESPONSE:", raw)
+    records = _decode_response(raw)
 
-        try:
-            records = _decode_response(raw)
-            return [_record_to_load(r) for r in records]
-        except TmsBusinessError:
-            continue
-
-    raise TmsBusinessError(
-        "SEARCH_FAILED",
-        "Could not determine required TMS search fields"
-    )
+    return [_record_to_load(r) for r in records]
 
 
 def get_load_detail(load_id: str) -> Optional[Load]:
