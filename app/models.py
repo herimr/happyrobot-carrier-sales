@@ -130,8 +130,8 @@ class NegotiationDecision(str, Enum):
 class NegotiationRequest(BaseModel):
     load_id: str
     loadboard_rate: float
-    max_rate: float
-    carrier_ask: float = Field(..., description="What the carrier is asking this round")
+    max_rate: Optional[float] = None  # Si no viene, lo lee del TMS internamente
+    carrier_ask: float
     round: int = Field(..., ge=1, le=3)
 
 class NegotiationResponse(BaseModel):
