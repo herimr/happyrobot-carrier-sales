@@ -54,6 +54,10 @@ def resend_otp(call_id: str) -> tuple[bool, str | None, int]:
 def validate_otp(call_id: str, submitted_code: str) -> tuple[bool, int, bool]:
     """Returns (valid, attempts_remaining, locked)."""
 
+    # Normalize: strip everything except digits, so "1, 2, 3, 4, 5, 6"
+    # and "123456" are treated the same.
+    submitted_code = "".join(ch for ch in submitted_code if ch.isdigit())
+
     # Demo/test bypass -- only active when OTP_TEST_CODE is set in the
     # environment. Leave unset in production.
     test_code = getattr(settings, "otp_test_code", None)
