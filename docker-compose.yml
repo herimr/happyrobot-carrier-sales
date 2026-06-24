@@ -1,0 +1,28 @@
+services:
+  integration-api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      API_AUTH_TOKEN: ${API_AUTH_TOKEN:-change-me}
+      # Demo/local default points at the bundled mock TMS below.
+      # In production, point these at the real TMS and remove the mock-tms
+      # service entirely.
+      TMS_HOST: ${TMS_HOST:-mock-tms}
+      TMS_PORT: ${TMS_PORT:-9999}
+      TMS_AUTH_TOKEN: ${TMS_AUTH_TOKEN:-change-me-tms-token}
+      FMCSA_MOCK_MODE: ${FMCSA_MOCK_MODE:-true}
+      FMCSA_WEB_KEY: ${FMCSA_WEB_KEY:-}
+    depends_on:
+      - mock-tms
+    restart: unless-stopped
+
+  # Self-contained demo/dev double for the customer's real legacy TMS.
+  # Remove this service (and point TMS_HOST/TMS_PORT at the real system) for
+  # production deployment.
+  mock-tms:
+    build: .
+    command: ["python", "-m", "app.mocks.mock_tms_server"]
+    ports:
+      - "9999:9999"
+    restart: unless-stopped
