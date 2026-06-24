@@ -4,6 +4,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 from pydantic import BaseModel, Field, field_validator
+from typing import Any, Optional
+
 
 # ---------------------------------------------------------------------------
 # TMS / Load search
@@ -88,10 +90,21 @@ class LoadPublic(BaseModel):
         return cls(**data)
 
 class BookLoadRequest(BaseModel):
-    load_id: str
+    load_id: Optional[str] = None
+    load: Optional[Any] = None
     mc_number: str
-    agreed_rate: float
+    agreed_rate: float = 0.0  # default si no viene
     call_id: str
+
+    @field_validator("agreed_rate", mode="before")
+    @classmethod
+    def parse_agreed_rate(cls, v):
+        if not v or str(v).strip() in ("", "null", "None"):
+            return 0.0
+        try:
+            return float(str(v).replace(",", "").replace("$", ""))
+        except (ValueError, TypeError):
+            return 0.0
 
 class BookLoadResponse(BaseModel):
     confirmation_id: str
