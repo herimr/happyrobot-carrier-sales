@@ -189,8 +189,8 @@ def _record_to_load(r: dict[str, str]) -> Load:
     from datetime import datetime
 
     def dt(s: str) -> datetime:
-        # Try a few common formats
-        for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y%m%d%H%M"):
+        # Try a few common formats, including the real TMS 14-digit format
+        for fmt in ("%Y%m%d%H%M%S", "%Y%m%d%H%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
             try:
                 return datetime.strptime(s.strip(), fmt)
             except ValueError:
@@ -198,15 +198,24 @@ def _record_to_load(r: dict[str, str]) -> Load:
         raise TmsProtocolError(f"unrecognized datetime format: {s!r}")
 
     try:
+        origin = f"{r['ORIG_CITY'].strip()}, {r.get('ORIG_STATE', '').strip()}".strip(", ")
+        destination = f"{r['DEST_CITY'].strip()}, {r.get('DEST_STATE', '').strip()}".strip(", ")
+
+        # Real TMS LOAD_QUERY response doesn't document MAX_RATE per the
+        # sample transcripts. Fall back to RATE if MAX_RATE isn't present
+        # rather than crashing -- flagged for confirmation against real data.
+        loadboard_rate = float(r["RATE"]) / 100  # RATE is in cents per spec
+        max_rate = float(r.get("MAX_RATE", r["RATE"])) / 100
+
         return Load(
             load_id=r["LOAD_ID"],
-            origin=r["ORIGIN"],
-            destination=r["DESTINATION"],
+            origin=origin,
+            destination=destination,
             pickup_datetime=dt(r["PICKUP_DT"]),
-            delivery_datetime=dt(r["DELIVERY_DT"]),
-            equipment_type=EquipmentType(r["EQUIPMENT"].lower()),
-            loadboard_rate=float(r["RATE"]),
-            max_rate=float(r["MAX_RATE"]),
+            delivery_datetime=dt(r.get("DELIVERY_DT", r["PICKUP_DT"])),
+            equipment_type=EquipmentType(r["EQTYPE"].lower()),
+            loadboard_rate=loadboard_rate,
+            max_rate=max_rate,
             weight=int(r.get("WEIGHT", 0)),
             commodity_type=r.get("COMMODITY", ""),
             num_of_pieces=int(r.get("PIECES", 0)),
@@ -222,30 +231,16 @@ def _record_to_load(r: dict[str, str]) -> Load:
 # Public API
 # ---------------------------------------------------------------------------
 
-def search_loads(
-    origin: str,
-    destination: Optional[str],
-    equipment_type: EquipmentType,
-) -> list[Load]:
-
-    fields: dict[str, str] = {
-        "ORIGIN": origin,
-        "EQUIPMENT": equipment_type.value.upper(),
+def search_loads(origin, destination, equipment_type):
+    fields = {
+        "ORIG_CITY": origin,
+        "EQTYPE": equipment_type.value.upper(),
     }
-
     if destination:
-        fields["DESTINATION"] = destination
+        fields["DEST_CITY"] = destination
 
-    request = _build_request("LOAD_QUERY", **fields)
-
-    print(f"TMS REQUEST: {request}")
-
-    raw = _send_recv(request)
-
-    print(f"TMS RESPONSE: {raw!r}")
-
+    raw = _send_recv(_build_request("LOAD_QUERY", **fields))
     records = _decode_response(raw)
-
     return [_record_to_load(r) for r in records]
 
 
@@ -267,8 +262,8 @@ def book_load(load_id: str, mc_number: str, agreed_rate: float) -> BookLoadRespo
     request = _build_request(
         "LOAD_BOOK",
         LOAD_ID=load_id,
-        MC=mc_number,
-        RATE=f"{agreed_rate:.2f}",
+        MC_NUM=mc_number,
+        AGREED_RATE=f"{int(round(agreed_rate * 100)):07d}",  # cents, matches RATE format
     )
 
     print(f"TMS REQUEST: {request}")
