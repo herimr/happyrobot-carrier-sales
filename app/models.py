@@ -130,9 +130,29 @@ class NegotiationDecision(str, Enum):
 class NegotiationRequest(BaseModel):
     load_id: str
     loadboard_rate: float
-    max_rate: Optional[float] = None  # Si no viene, lo lee del TMS internamente
-    carrier_ask: float
-    round: int = Field(..., ge=1, le=3)
+    max_rate: Optional[float] = None
+    carrier_ask: float = 0.0
+    round: int = Field(1, ge=1, le=3)
+
+    @field_validator("carrier_ask", mode="before")
+    @classmethod
+    def parse_carrier_ask(cls, v):
+        if not v or str(v).strip() == "":
+            return 0.0
+        try:
+            return float(str(v).replace(",", "").replace("$", ""))
+        except (ValueError, TypeError):
+            return 0.0
+
+    @field_validator("round", mode="before")
+    @classmethod
+    def parse_round(cls, v):
+        if not v or str(v).strip() == "":
+            return 1
+        try:
+            return max(1, min(3, int(float(str(v)))))
+        except (ValueError, TypeError):
+            return 1
 
 class NegotiationResponse(BaseModel):
     decision: NegotiationDecision
