@@ -169,7 +169,7 @@ def _record_to_load(r: dict[str, str]) -> Load:
 
     def dt(s: str) -> datetime:
         # Try a few common formats
-        for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y%m%d%H%M"):
+        for fmt in ("%Y%m%d%H%M%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y%m%d%H%M"):
             try:
                 return datetime.strptime(s.strip(), fmt)
             except ValueError:
@@ -177,21 +177,41 @@ def _record_to_load(r: dict[str, str]) -> Load:
         raise TmsProtocolError(f"unrecognized datetime format: {s!r}")
 
     try:
+        # Real TMS field names per spec transcripts
+        orig_city  = r.get("ORIG_CITY", "").strip()
+        orig_state = r.get("ORIG_STATE", "").strip()
+        dest_city  = r.get("DEST_CITY", "").strip()
+        dest_state = r.get("DEST_STATE", "").strip()
+        origin      = f"{orig_city}, {orig_state}" if orig_state else orig_city
+        destination = f"{dest_city}, {dest_state}" if dest_state else dest_city
+
+        # RATE is in cents (7 digits, zero-padded) per the sample transcripts
+        rate_raw = r.get("RATE", "0").strip()
+        rate = float(rate_raw) / 100 if len(rate_raw) >= 6 else float(rate_raw)
+
+        # PICKUP_DT format: 20260512080000 (YYYYMMDDHHmmss)
+        pickup_raw = r.get("PICKUP_DT", "").strip()
+
+        # MAX_RATE not provided by TMS in query results; derive from RATE with a
+        # small buffer so the negotiation engine has a usable ceiling.
+        # In production replace with a real source (LOAD_GET or a rate sheet).
+        max_rate = rate * 1.15
+
         return Load(
-            load_id=r["LOAD_ID"],
-            origin=r["ORIGIN"],
-            destination=r["DESTINATION"],
-            pickup_datetime=dt(r["PICKUP_DT"]),
-            delivery_datetime=dt(r["DELIVERY_DT"]),
-            equipment_type=EquipmentType(r["EQUIPMENT"].lower()),
-            loadboard_rate=float(r["RATE"]),
-            max_rate=float(r["MAX_RATE"]),
-            weight=int(r.get("WEIGHT", 0)),
-            commodity_type=r.get("COMMODITY", ""),
-            num_of_pieces=int(r.get("PIECES", 0)),
-            miles=int(r.get("MILES", 0)),
-            dimensions=r.get("DIMENSIONS", ""),
-            notes=r.get("NOTES") or None,
+            load_id=r["LOAD_ID"].strip(),
+            origin=origin,
+            destination=destination,
+            pickup_datetime=dt(pickup_raw),
+            delivery_datetime=dt(pickup_raw),   # TMS only returns pickup; estimate delivery
+            equipment_type=EquipmentType(r["EQTYPE"].strip().lower()),
+            loadboard_rate=rate,
+            max_rate=max_rate,
+            weight=int(r.get("WEIGHT", "0").strip() or 0),
+            commodity_type=r.get("COMMODITY", "").strip(),
+            num_of_pieces=int(r.get("PIECES", "0").strip() or 0),
+            miles=int(r.get("MILES", "0").strip() or 0),
+            dimensions=r.get("DIMENSIONS", "").strip(),
+            notes=r.get("NOTES", "").strip() or None,
         )
     except (KeyError, ValueError) as exc:
         raise TmsProtocolError(f"malformed load record — missing/bad field: {exc}") from exc
@@ -201,17 +221,31 @@ def _record_to_load(r: dict[str, str]) -> Load:
 # Public API
 # ---------------------------------------------------------------------------
 
+def _parse_location(loc: str) -> dict[str, str]:
+    """Split 'Chicago, IL' into ORIG_CITY + ORIG_STATE as the TMS expects."""
+    parts = [p.strip() for p in loc.split(",")]
+    if len(parts) >= 2:
+        return {"ORIG_CITY": parts[0], "ORIG_STATE": parts[1]}
+    return {"ORIG_CITY": loc}
+
+
 def search_loads(
     origin: str,
     destination: Optional[str],
     equipment_type: EquipmentType,
 ) -> list[Load]:
+    # Real field names per the TMS spec transcripts: ORIG_CITY, ORIG_STATE, EQTYPE
     fields: dict[str, str] = {
-        "ORIGIN": origin,
-        "EQUIPMENT": equipment_type.value.upper(),
+        **_parse_location(origin),
+        "EQTYPE": equipment_type.value.upper(),
+        "MAX_RESULTS": "10",
     }
     if destination:
-        fields["DESTINATION"] = destination
+        dest_parts = [p.strip() for p in destination.split(",")]
+        if len(dest_parts) >= 2:
+            fields["DEST_STATE"] = dest_parts[1]
+        else:
+            fields["DEST_CITY"] = destination
 
     raw = _send_recv(_build_request("LOAD_QUERY", **fields))
     records = _decode_response(raw)
