@@ -1,51 +1,57 @@
 from fastapi import APIRouter, Depends, HTTPException
-
+from typing import Any, Optional
 from app.auth import require_auth
-from app.models import (
-    BookLoadRequest,
-    BookLoadResponse,
-    LoadPublic,
-    LoadSearchRequest,
-)
+from app.models import BookLoadRequest, BookLoadResponse, LoadPublic, LoadSearchRequest
 from app.services import tms_client
-from app.services.tms_client import TmsConnectionError, TmsProtocolError
+from app.services.tms_client import TmsConnectionError, TmsProtocolError, TmsBusinessError
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/tms", tags=["tms"], dependencies=[Depends(require_auth)])
 
+class BookLoadRequestFlex(BaseModel):
+    """Accepts load_id directly or nested inside a load object from HappyRobot's data.0"""
+    load_id: Optional[str] = None
+    load: Optional[Any] = None  # data.0 object if sent as nested
+    mc_number: str
+    agreed_rate: float
+    call_id: str
 
 @router.post("/search", response_model=list[LoadPublic])
 def search_loads(req: LoadSearchRequest):
     try:
         loads = tms_client.search_loads(req.origin, req.destination, req.equipment_type)
     except TmsConnectionError:
-        raise HTTPException(status_code=503, detail="TMS temporarily unavailable, please try again shortly")
+        raise HTTPException(status_code=503, detail="TMS temporarily unavailable")
     except TmsProtocolError:
         raise HTTPException(status_code=502, detail="TMS returned an unexpected response")
-
-    # Critical: max_rate is stripped here, server-side, before this ever
-    # reaches the voice agent's context. The agent literally cannot see it.
     return [LoadPublic.from_load(load) for load in loads]
-
 
 @router.get("/load/{load_id}", response_model=LoadPublic)
 def get_load(load_id: str):
     try:
         load = tms_client.get_load_detail(load_id)
     except TmsConnectionError:
-        raise HTTPException(status_code=503, detail="TMS temporarily unavailable, please try again shortly")
+        raise HTTPException(status_code=503, detail="TMS temporarily unavailable")
     except TmsProtocolError:
         raise HTTPException(status_code=502, detail="TMS returned an unexpected response")
-
     if load is None:
         raise HTTPException(status_code=404, detail="load not found")
     return LoadPublic.from_load(load)
 
-
 @router.post("/book", response_model=BookLoadResponse)
-def book_load(req: BookLoadRequest):
+def book_load(req: BookLoadRequestFlex):
+    # Extract load_id from nested object if not provided directly
+    load_id = req.load_id
+    if not load_id and req.load:
+        if isinstance(req.load, dict):
+            load_id = req.load.get("load_id")
+    if not load_id:
+        raise HTTPException(status_code=400, detail="load_id is required")
     try:
-        return tms_client.book_load(req.load_id, req.mc_number, req.agreed_rate)
+        return tms_client.book_load(load_id, req.mc_number, req.agreed_rate)
+    except TmsBusinessError as exc:
+        raise HTTPException(status_code=422, detail=f"{exc.code}: {exc.msg}")
     except TmsConnectionError:
-        raise HTTPException(status_code=503, detail="TMS temporarily unavailable, please try again shortly")
+        raise HTTPException(status_code=503, detail="TMS temporarily unavailable")
     except TmsProtocolError:
         raise HTTPException(status_code=502, detail="TMS returned an unexpected response")
