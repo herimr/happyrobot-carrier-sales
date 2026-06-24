@@ -9,12 +9,15 @@ router = APIRouter(prefix="/negotiation", tags=["negotiation"], dependencies=[De
 @router.post("/evaluate", response_model=NegotiationResponse)
 def evaluate(req: NegotiationRequest):
     try:
-        # If max_rate not provided, fetch it from TMS (never exposed to agent)
         if req.max_rate is None:
-            load = tms_client.get_load_detail(req.load_id)
-            if load is None:
-                raise HTTPException(status_code=404, detail="load not found")
-            req = req.model_copy(update={"max_rate": load.max_rate})
+            try:
+                load = tms_client.get_load_detail(req.load_id)
+                if load is not None:
+                    req = req.model_copy(update={"max_rate": load.max_rate})
+                else:
+                    req = req.model_copy(update={"max_rate": req.loadboard_rate * 1.15})
+            except Exception:
+                req = req.model_copy(update={"max_rate": req.loadboard_rate * 1.15})
         return evaluate_negotiation(req)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
